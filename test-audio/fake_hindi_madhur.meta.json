@@ -1,0 +1,15 @@
+{
+  "file": "fake_hindi_madhur.wav",
+  "type": "fake",
+  "description": "Modern neural TTS in Hindi - Microsoft Edge 'hi-IN-MadhurNeural' reading a Hindi identity-verification line",
+  "provenance": "Synthesized demo clip via edge-tts (Microsoft Azure neural TTS)",
+  "consent": {
+    "recorded_with_consent": false,
+    "source_license": "Synthesized for demo per Microsoft terms of use",
+    "public_domain_or_licensed": true,
+    "synthetic_created_with_provider_consent": true,
+    "note": "Demo only - generated from provider service as test fixture"
+  },
+  "sample_rate": 24000,
+  "duration_s": 3.0
+}

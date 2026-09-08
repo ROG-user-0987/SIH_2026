@@ -1,0 +1,15 @@
+{
+  "file": "real_human.wav",
+  "type": "real",
+  "description": "Genuine human speech (LibriSpeech row 0, resampled to 16k mono)",
+  "provenance": "LibriSpeech clean test",
+  "speaker_id": 1272,
+  "consent": {
+    "recorded_with_consent": false,
+    "source_license": "LibriSpeech CC BY 4.0",
+    "public_domain_or_licensed": true,
+    "synthetic_created_with_provider_consent": null
+  },
+  "sample_rate": 16000,
+  "duration_s": 5.9
+}

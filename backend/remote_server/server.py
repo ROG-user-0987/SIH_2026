@@ -19,6 +19,7 @@ NB_SAMP = 64600
 SAMPLE_RATE = 16000
 
 SERVE_MODEL = os.getenv("MODEL_NAME", "spectra")  # spectra | aasist_local
+MODEL_FP16 = os.getenv("MODEL_FP16", "true").lower() == "true"
 AASIST_LOCAL_CODE = os.getenv(
     "AASIST_LOCAL_CODE", str(Path(__file__).resolve().parent.parent / "detectors" / "aasist")
 )
@@ -57,11 +58,14 @@ class BaseWrapper:
     def infer_logits(self, x: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError
 
+    def prepare_input(self, x: torch.Tensor) -> torch.Tensor:
+        return x
+
 
 class SpectraWrapper(BaseWrapper):
     name = "spectra-aasist3"
     display = "Spectra-AASIST3 (XLS-R 300M, KAN, ASVspoof5/MLAAD-trained)"
-    spoof_idx = 1
+    spoof_idx = 0  # class 0 = spoof, class 1 = bonafide (ASVspoof5 convention)
 
     def load(self):
         import sys
@@ -71,10 +75,17 @@ class SpectraWrapper(BaseWrapper):
         logger.info("Downloading Spectra-AASIST3 weights + XLS-R-300M on first start (one-time, on THIS machine)...")
         self.model = SpectraAASIST3.from_pretrained("lab260/Spectra-AASIST3")
         self.model.eval().to(self.device)
-        logger.info(f"Spectra-AASIST3 loaded on {self.device}")
+        if MODEL_FP16 and self.device.type == "cuda":
+            self.model = self.model.half()
+        logger.info(f"Spectra-AASIST3 loaded on {self.device} (fp16={MODEL_FP16})")
 
     def infer_logits(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x)
+
+    def prepare_input(self, x: torch.Tensor) -> torch.Tensor:
+        if next(self.model.parameters()).dtype == torch.float16:
+            return x.half()
+        return x
 
 
 class LocalAASISTWrapper(BaseWrapper):
@@ -194,7 +205,7 @@ async def analyze(request: Request):
     start = time.perf_counter()
     with _wrapper.lock:
         with torch.inference_mode():
-            logits = _wrapper.infer_logits(x_in)
+            logits = _wrapper.infer_logits(_wrapper.prepare_input(x_in))
     latency_ms = (time.perf_counter() - start) * 1000.0
 
     logits = logits.float().cpu().view(-1).tolist()

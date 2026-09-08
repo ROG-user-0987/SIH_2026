@@ -1,7 +1,7 @@
 # SIH26104 — Voice Cloning Detection System: Team Report
 
-**Date:** 2026-09-06
-**Version:** 0.3 (real-mode, remote-inference architecture)
+**Date:** 2026-09-08
+**Version:** 0.4 (single-box real-mode: Spectra-AASIST3 GPU + speaker layer, 4-signal fusion)
 **Problem track:** SIH26104 — detect real-time voice cloning / deepfake speech and flag it as FAKE with honest confidence, while keeping genuine speech as REAL.
 
 ---
@@ -37,6 +37,17 @@ signals: [(ssl_aasist, 0.0), (aasist, 0.0), (prosody, 0.4505)]
 optional: {remote_model: aasist-2019la, remote_latency_ms: 467.5, remote_loaded: True}
 ```
 
+**Current pipeline (v0.4, Spectra-AASIST3 + speaker, measured 2026-09-08):**
+
+| Input | ssl_aasist | aasist | prosody | speaker | Verdict / Risk |
+|---|---|---|---|---|---|
+| Real human speech (enrolled speaker A) | 0.000 | 0.000 | ~0.48 | **0.05** (sim 0.96) | REAL / 52 |
+| Edge-TTS fake (en-IN, 9s) | 0.9998 | 0.9998 | ~0.47 | **0.90** (sim 0.05) | FAKE / 71 |
+| Edge-TTS fake (hi-IN, 3s) | 0.962 | 0.962 | 0.50 | **0.90** (sim 0.05) | FAKE / 71 |
+| Known-speaker real speech streamed via WS | 0.000 | 0.000 | 0.48 | 0.05 | REAL / 52 |
+
+Single-window latency (GPU fp16): ~420–550 ms remote + ~50 ms local.
+
 > **Critical, must be told to judges:** the *classic* AASIST (trained on ASVspoof2019-LA) does **NOT generalize to 2025-era neural TTS** (Edge-TTS/HiFi-GAN-style). It calls modern AI voices "REAL". This is a known, well-documented problem (Generalization gap; EER ≈ 43 % on InTheWild). **Any modern-AI voice that goes "REAL" is the 2019 checkpoint's failure, not a bug in the pipeline.** The fix is a modern checkpoint (Spectra-AASIST3 / SSL-AASIST / AASIST3 trained on ASVspoof5+MLAAD) — served remotely, once, on the GPU box (see §7).
 
 Also measured while chasing options (so nobody re-wastes bandwidth):
@@ -63,6 +74,7 @@ Local FastAPI backend  (ws://<host>:8000/ws/analyze)
   │   └─ MOCK  : deterministic-ish placeholder (offline demo only)
   │  ▼
   │  Prosody heuristics (fast fallback — see §6)
+  │  SpeakerVerifier (ECAPA-TDNN + FAISS) — known-speaker match/impostor signal
   │  │  Fusion (weighted logit → 0–100 risk, verdict, confidence)
   │  │  Explainability (rationale tags, dominant signal)
   │  ▼ result JSON
@@ -71,6 +83,8 @@ Browser UI: RiskGauge + ResultPanel + ExplanationPanel + ConnectionStatus
 ```
 
 **Signal semantics (UI-facing):** every `score` is **probability of SPOOF (0–1)**. Verdict thresholds: `risk_score >= 70 → FAKE`, else `REAL` (this maps Fusion output; window too quiet → `INSUFFICIENT_SPEECH`).
+
+**Speaker layer (added v0.4):** `backend/detectors/speaker.py` uses SpeechBrain ECAPA-TDNN (GPU) for 192-d embeddings, L2-normalized, with a FAISS index for enrolled speakers. Score semantics: no enrollment → 0.5; enrolled & matched (sim ≥ 0.45) → 0.05; enrolled & unmatched → 0.90. Enroll via `POST /enroll` (base64 int16 PCM), persist to `backend/models/speakers/speaker_index.npz`, autoload with `SPEAKERS_AUTOLOAD=true`. Fusion weights now `[ssl .35, aasist .30, prosody .15, speaker .20]`.
 
 ---
 
@@ -124,24 +138,25 @@ SIH/
 {
   "type": "result",
   "window_ts_start": "...", "window_ts_end": "...",
-  "risk_score": 52,
-  "verdict": "REAL",
-  "confidence": 0.51,
+  "risk_score": 71,
+  "verdict": "FAKE",
+  "confidence": 0.71,
   "signals": [
-    {"name":"ssl_aasist","category":"spectral","score":0.0,"weight":0.36,"loaded":true},
-    {"name":"aasist","category":"spectral","score":0.0,"weight":0.28,"loaded":true},
-    {"name":"prosody","category":"prosody","score":0.4505,"weight":0.16,"top_feature":"..."}
+    {"name":"ssl_aasist","category":"spectral","score":1.0,"weight":0.35,"loaded":true},
+    {"name":"aasist","category":"spectral","score":1.0,"weight":0.30,"loaded":true},
+    {"name":"prosody","category":"prosody","score":0.46,"weight":0.15,"top_feature":"..."},
+    {"name":"speaker","category":"speaker","score":0.9,"weight":0.20,"matched_speaker":null,"similarity":0.049}
   ],
-  "optional_signals": {"remote_model":"aasist-2019la","remote_latency_ms":467.5,"remote_loaded":true},
-  "explanation": {"dominant_signal":"aasist","dominant_category":"spectral","rationale_tags":["natural_spectral_pattern","low_confidence_signal"],"explainability_version":"explain-v0.1"},
-  "model_versions": {"fusion":"fusion-v0.3","ssl_aasist":"ssl-aasist-v0.1","aasist":"aasist-v0.1","prosody":"prosody-v0.1"}
+  "optional_signals": {"remote_model":"spectra-aasist3","remote_latency_ms":416.0,"remote_loaded":true},
+  "explanation": {"dominant_signal":"ssl_aasist","dominant_category":"spectral","rationale_tags":["unnatural_spectral_pattern","high_confidence_signal"],"explainability_version":"explain-v0.1"},
+  "model_versions": {"fusion":"fusion-v0.4","ssl_aasist":"ssl-aasist-v0.1","aasist":"aasist-v0.1","prosody":"prosody-v0.1","speaker":"speaker-v0.4"}
 }
 ```
 
 **Remote inference HTTP API** (`backend/remote_server/server.py`):
 - `GET  /health` → `{status, model, device, torch_cuda}`
 - `POST /analyze?fmt=float32|int16&sr=16000` — body = raw PCM → `{model, model_display, device, latency_ms, nb_samp, len_in, logits, probs, spoof_prob}`
-- Class convention per model: `spectra` → `probs[1]` is spoof; `aasist_local` (clovaai) → `probs[0]` is spoof.
+- Class convention per model: `spectra` → `probs[0]` is spoof; `aasist_local` (clovaai) → `probs[0]` is spoof.
 
 ---
 
@@ -153,7 +168,7 @@ SIH/
 4. **Slow local libraries kill real-time:** librosa `pyin` on 4 s windows took seconds on CPU. Gated behind `USE_LIBROSA_PROSODY` (default off → fast autocorrelation fallback). VAD defaults to energy-based so nothing downloads at runtime (`USE_SILERO_VAD=true` opts back in).
 5. **Zero team-laptop downloads:** all heavy artifacts (weights, SSL encoder) download **once, on the GPU host**. Local machine needs only pip deps (already installed) + npm packages.
 6. **Robustness:** on remote unreachable, backend returns a neutral low-confidence fallback (`remote_loaded:false`) instead of crashing — the UI can show "model unavailable" honestly.
-7. **Fusion weights** `[ssl .45, aasist .35, prosody .20]` — in remote mode the strong model feeds both the `ssl_aasist` and `aasist` slots (documented), so it dominates; prosody stays as a secondary heuristic. Retrain/retune when a labelled validation set exists.
+7. **Fusion weights** `[ssl .35, aasist .30, prosody .15, speaker .20]` — in remote mode the strong Spectra model feeds both the `ssl_aasist` and `aasist` slots (documented), so it dominates; the speaker signal provides an independent known-voice/impostor check. Retrain/retune when a labelled validation set exists.
 
 ---
 

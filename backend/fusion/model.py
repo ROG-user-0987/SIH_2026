@@ -15,7 +15,7 @@ class FusionModel:
         self.model_path = model_path
         self._model = None
         self._loaded = False
-        self._weights = np.array([0.45, 0.35, 0.20])
+        self._weights = np.array([0.35, 0.30, 0.15, 0.20])
         self._bias = 0.0
         self._load_model()
 
@@ -48,8 +48,9 @@ class FusionModel:
         ssl_aasist_score: float,
         aasist_score: float,
         prosody_score: float,
+        speaker_score: float = 0.5,
     ) -> dict:
-        scores = np.array([ssl_aasist_score, aasist_score, prosody_score])
+        scores = np.array([ssl_aasist_score, aasist_score, prosody_score, speaker_score])
 
         if self._loaded and self._model is not None:
             try:
@@ -108,5 +109,6 @@ class FusionModel:
                 "ssl_aasist": round(float(contribution_weights[0]), 4),
                 "aasist": round(float(contribution_weights[1]), 4),
                 "prosody": round(float(contribution_weights[2]), 4),
+                "speaker": round(float(contribution_weights[3]), 4),
             },
         }

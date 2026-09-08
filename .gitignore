@@ -9,3 +9,9 @@ out/
 dist/
 *.egg-info/
 *.onnx
+weights/
+test-audio/*.wav
+*.log
+*.log.err
+backend/models/speakers/speaker_index.npz
+backend/models/speakers/ecapa/embedding_model.ckpt

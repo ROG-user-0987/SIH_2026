@@ -90,7 +90,6 @@ class ProsodyDetector:
                 score += 0.1 if val < 0.05 else -0.1
             elif "speech_rate" in name:
                 score += 0.1 if val < 3.0 or val > 6.0 else -0.05
-        score += np.random.uniform(-0.05, 0.05)
         return float(np.clip(score, 0.0, 1.0))
 
     def extract_features(self, audio: np.ndarray) -> np.ndarray:

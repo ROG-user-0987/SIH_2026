@@ -50,7 +50,7 @@ async def main() -> None:
         print("signals:", [(s["name"], round(s["score"], 4)) for s in data["signals"]])
         print("optional:", data["optional_signals"])
         print("explanation:", data["explanation"])
-        assert len(data["signals"]) == 3
+        assert len(data["signals"]) == 4
         print("SMOKE TEST PASSED")
 
 

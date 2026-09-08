@@ -10,6 +10,7 @@ import numpy as np
 
 from ..vad import SileroVAD
 from ..detectors import AASISTDetector, SSLAASISTDetector, ProsodyDetector, RemoteDetector
+from ..detectors.speaker import SpeakerVerifier
 from ..fusion import FusionModel
 from ..explainability import TagVocabulary, WeightNormalizer
 from ..sandbox import MockProcessor
@@ -28,10 +29,12 @@ class WebSocketHandler:
         model_dir: Optional[str] = None,
         remote_url: Optional[str] = None,
         use_silero: bool = False,
+        speak_autoload: bool = False,
     ):
         self.mock_mode = mock_mode
         self.remote_mode = bool(remote_url)
         self.mock_processor = MockProcessor() if mock_mode else None
+        self.speaker_verifier = SpeakerVerifier(enroll_autoload=speak_autoload)
 
         if not mock_mode:
             self.vad = SileroVAD(use_torch=use_silero)
@@ -158,6 +161,7 @@ class WebSocketHandler:
             ssl_result = self.ssl_aasist.predict(window)
             aasist_result = self.aasist.predict(window)
         prosody_result = self.prosody.predict(window)
+        speaker_result = self.speaker_verifier.verify(window)
 
         signals = [
             {
@@ -179,12 +183,21 @@ class WebSocketHandler:
                 "weight": 0.0,
                 "top_feature": prosody_result.get("top_feature", "unknown"),
             },
+            {
+                "name": speaker_result["name"],
+                "category": speaker_result["category"],
+                "score": speaker_result["score"],
+                "weight": 0.0,
+                "matched_speaker": speaker_result.get("matched_speaker"),
+                "similarity": speaker_result.get("similarity"),
+            },
         ]
 
         fusion_result = self.fusion.fuse(
             ssl_aasist_score=ssl_result["score"],
             aasist_score=aasist_result["score"],
             prosody_score=prosody_result["score"],
+            speaker_score=speaker_result["score"],
         )
 
         weights = fusion_result.get("weights", {})
@@ -227,6 +240,7 @@ class WebSocketHandler:
                 "ssl_aasist": "ssl-aasist-v0.1",
                 "aasist": "aasist-v0.1",
                 "prosody": "prosody-v0.1",
+                "speaker": self.speaker_verifier.VERSION,
             },
         }
 

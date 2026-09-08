@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Voice Cloning Detector — SIH26104</title>
+<style>
+  :root { --bg:#0b1020; --card:#141a2e; --line:#232c47; --txt:#e6ecff; --mut:#8aa0cf; --fake:#ff4d6d; --real:#2bd97b; --warn:#ffc94d; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--txt); font-family:'Segoe UI',system-ui,sans-serif; padding:24px; }
+  h1 { font-size:20px; letter-spacing:.5px; }
+  .sub { color:var(--mut); font-size:12px; margin-top:4px; }
+  header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px; }
+  .row { display:flex; gap:16px; flex-wrap:wrap; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  .col-main { flex:1 1 380px; }
+  .col-side { flex:1 1 300px; }
+  .col-wide { flex:1 1 100%; }
+  .gauge-wrap { display:flex; align-items:center; gap:20px; }
+  .gauge { width:110px; height:110px; border-radius:50%; background:conic-gradient(var(--real) calc(var(--p)*1%), #26304f 0); display:grid; place-items:center; position:relative; }
+  .gauge::before { content:''; position:absolute; inset:10px; background:var(--card); border-radius:50%; }
+  .gauge span { position:relative; font-size:26px; font-weight:700; }
+  .verdict { font-size:28px; font-weight:800; }
+  .fake-col { color:var(--fake); } .real-col { color:var(--real); } .warn-col { color:var(--warn); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); }
+  th { color:var(--mut); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.6px; }
+  .bar { height:8px; border-radius:4px; background:#26304f; overflow:hidden; min-width:80px; }
+  .bar span { display:block; height:100%; background:var(--mut); }
+  .btn { background:#2b3a63; color:#fff; border:1px solid #3c4f85; border-radius:8px; padding:9px 14px; font-size:13px; cursor:pointer; }
+  .btn:hover { background:#37508a; }
+  .btn:disabled { opacity:.45; cursor:not-allowed; }
+  .btn-danger { background:#5a2330; border-color:#8c3a4c; }
+  .btn-ok { background:#1e5a3c; border-color:#2f8a5c; }
+  input[type=file] { font-size:12px; color:var(--mut); }
+  #status { font-size:12px; color:var(--warn); }
+  .timeline { display:flex; gap:6px; align-items:flex-end; min-height:44px; }
+  .tl-bar { width:22px; border-radius:4px 4px 0 0; background:var(--mut); }
+  .tag { display:inline-block; font-size:11px; padding:2px 8px; border-radius:10px; margin:2px; background:#22305a; color:#cddcff; }
+  .mono { font-family:Consolas,monospace; font-size:12px; color:var(--mut); }
+  .dl { display:flex; flex-direction:column; gap:8px; font-size:13px; }
+  .dl div { display:flex; justify-content:space-between; }
+  .dl b { color:#fff; }
+  .hidden { display:none; }
+  .warn-banner { background:rgba(255,77,109,.12); border:1px solid rgba(255,77,109,.4); color:#ffb3c0; padding:10px 14px; border-radius:8px; font-weight:600; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Voice Cloning Detector</h1>
+    <div class="sub">SIH26104 · Real-time deepfake speech analysis · 4s windows</div>
+  </div>
+  <div style="display:flex;gap:10px;align-items:center">
+    <button class="btn" id="rec-btn" title="Needs microphone permission">🎤 Record (demo)</button>
+    <span id="status">Disconnected</span>
+  </div>
+</header>
+
+<div class="row">
+  <div class="card col-main">
+    <div class="gauge-wrap">
+      <div class="gauge" id="gauge" style="--p:0"><span id="pct">0</span></div>
+      <div>
+        <div class="verdict real-col" id="verdict">WAITING</div>
+        <div class="mono" id="conf">confidence —</div>
+        <div class="mono" id="chunk">0 windows</div>
+      </div>
+    </div>
+    <div style="margin-top:16px" id="alert"></div>
+  </div>
+
+  <div class="card col-side">
+    <div style="font-weight:700;margin-bottom:10px">Controls</div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div>
+        <label class="sub" style="display:block;margin-bottom:6px">Upload audio file (wav/mp3/m4a)</label>
+        <input type="file" id="file" accept="audio/*">
+      </div>
+      <button class="btn-ok btn" id="run-btn" disabled>Run analysis</button>
+      <button class="btn" id="stop-btn" disabled>Stop</button>
+      <button class="btn" id="enroll-btn" title="Records ~3s of your voice and enrolls it as 'demo'">🗣 Enroll my voice</button>
+    </div>
+    <div style="margin-top:14px" class="dl">
+      <div><span class="sub">Model</span><b id="m-model">—</b></div>
+      <div><span class="sub">Latency / window</span><b id="m-lat">—</b></div>
+      <div><span class="sub">Speaker match</span><b id="m-spr">—</b></div>
+    </div>
+  </div>
+</div>
+
+<div class="row" style="margin-top:16px">
+  <div class="card col-wide">
+    <div style="font-weight:700;margin-bottom:10px">Per-signal breakdown</div>
+    <table>
+      <thead><tr><th>Signal</th><th>Category</th><th>Spoof score</th><th>0 —·— 1</th><th>Detail</th></tr></thead>
+      <tbody id="sig-body"><tr><td colspan="5" class="sub">No window analyzed yet.</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="row" style="margin-top:16px">
+  <div class="card col-wide">
+    <div style="font-weight:700;margin-bottom:10px">Timeline <span class="sub">(last results)</span></div>
+    <div class="timeline" id="timeline"></div>
+  </div>
+</div>
+
+<div class="row" style="margin-top:16px">
+  <div class="card col-wide">
+    <div style="font-weight:700;margin-bottom:10px">Explanation</div>
+    <div id="exp" class="sub">Awaiting analysis…</div>
+  </div>
+</div>
+
+<script>
+const WS = 'ws://localhost:8000/ws/analyze';
+const ENROLL = 'http://localhost:8000/enroll';
+const el = (id) => document.getElementById(id);
+let ws = null, pctHistory = [], running = false;
+
+function setStatus(s, color) { const x = el('status'); x.textContent = s; x.style.color = color || '#ffc94d'; }
+function setVerdict(v, risk) {
+  const x = el('verdict');
+  x.textContent = v;
+  x.className = 'verdict ' + (v === 'FAKE' ? 'fake-col' : v === 'REAL' ? 'real-col' : 'warn-col');
+  el('pct').textContent = risk;
+  el('gauge').style.setProperty('--p', risk);
+  el('gauge').style.background = `conic-gradient(${v === 'FAKE' ? 'var(--fake)' : v === 'REAL' ? 'var(--real)' : 'var(--warn)'} calc(${risk}*1%), #26304f 0)`;
+}
+function alertBanner(text, kind) {
+  const a = el('alert');
+  if (!text) { a.innerHTML = ''; return; }
+  a.className = 'warn-banner';
+  a.textContent = text;
+}
+function drawTimeline() {
+  const t = el('timeline'); t.innerHTML = '';
+  pctHistory.slice(-24).forEach(p => {
+    const b = document.createElement('div');
+    b.className = 'tl-bar';
+    b.style.height = Math.max(6, p * 0.55) + 'px';
+    b.style.background = p >= 70 ? 'var(--fake)' : p <= 30 ? 'var(--real)' : 'var(--warn)';
+    t.appendChild(b);
+  });
+}
+function renderResult(r) {
+  setVerdict(r.verdict, r.risk_score);
+  el('conf').textContent = `confidence ${r.confidence}`;
+  el('chunk').textContent = `${pctHistory.length} windows`;
+  el('m-model').textContent = r.optional_signals?.remote_model || '—';
+  el('m-lat').textContent = r.optional_signals?.remote_latency_ms ? r.optional_signals.remote_latency_ms + ' ms' : '—';
+  const sp = r.signals.find(s => s.name === 'speaker');
+  el('m-spr').textContent = sp ? (sp.matched_speaker ? `${sp.matched_speaker} (${sp.similarity})` : 'no enrollment') : '—';
+
+  const rows = r.signals.map(s => {
+    const pct = Math.round(s.score * 100);
+    return `<tr>
+      <td>${s.name}</td><td>${s.category}</td>
+      <td>${s.score.toFixed(3)}</td>
+      <td><div class="bar"><span style="width:${pct}%;background:${s.score>0.7?'var(--fake)':s.score<0.3?'var(--real)':'var(--warn)'}"></span></div></td>
+      <td class="sub">${s.top_feature ? 'top: ' + s.top_feature : ''}${s.similarity !== undefined ? 'sim: ' + s.similarity : ''}</td>
+    </tr>`;
+  }).join('');
+  el('sig-body').innerHTML = rows;
+
+  el('exp').innerHTML = (r.explanation?.rationale_tags || []).map(t => `<span class="tag">${t}</span>`).join(' ')
+    + `<div class="mono" style="margin-top:6px">dominant: ${r.explanation?.dominant_signal} · ${r.explanation?.explainability_version}</div>`;
+  alertBanner(r.verdict === 'FAKE' ? '⚠ High-confidence artificial speech pattern detected — treat as spoofed.' : '', null);
+}
+
+function connectLoop() {
+  try { ws = new WebSocket(WS); } catch (e) { setTimeout(connectLoop, 3000); return; }
+  ws.onopen = () => { setStatus('Connected', '#2bd97b'); el('run-btn').disabled = !el('file').files.length; };
+  ws.onclose = () => { setStatus('Disconnected', '#ffc94d'); if (running) setTimeout(connectLoop, 1500); };
+  ws.onerror = () => {};
+  ws.onmessage = (ev) => {
+    if (typeof ev.data !== 'string') return;
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'result') { pctHistory.push(msg.risk_score); renderResult(msg); drawTimeline(); }
+    if (msg.type === 'error') { setStatus('Server error: ' + msg.error, '#ff4d6d'); }
+  };
+}
+
+async function startAnalysis() {
+  const file = el('file').files[0];
+  if (!file) return;
+  const buf = await file.arrayBuffer();
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const audio = await ctx.decodeAudioData(buf);
+  const sr = 16000;
+  const tmp = ctx.createBuffer(1, Math.ceil(audio.length * sr / audio.sampleRate), sr);
+  const ch = tmp.getChannelData(0);
+  for (let i = 0; i < ch.length; i++) ch[i] = audio.getChannelData(0)[Math.floor(i * audio.sampleRate / sr)];
+  const pcm = ch;
+  pctHistory = []; el('timeline').innerHTML = ''; el('sig-body').innerHTML = '';
+  setVerdict('ANALYZING', 0); el('conf').textContent = 'streaming ' + (ch.length / sr).toFixed(1) + 's…';
+
+  if (!ws || ws.readyState !== WebSocket.OPEN) { setStatus('No connection', '#ff4d6d'); return; }
+  running = true;
+  el('run-btn').disabled = true; el('stop-btn').disabled = false;
+  ws.send(JSON.stringify({ type: 'session_init', session_id: 'demo-' + Date.now(), sample_rate: sr }));
+  const bytesPerFrame = 8000; // 250ms
+  for (let off = 0; off < pcm.length; off += bytesPerFrame / 2) {
+    if (!running) break;
+    const frame = pcm.subarray(off, off + bytesPerFrame / 2);
+    const i16 = new Int16Array(frame.length);
+    for (let i = 0; i < frame.length; i++) i16[i] = Math.max(-1, Math.min(1, frame[i])) * 32767;
+    ws.send(i16.buffer);
+    await new Promise(r => setTimeout(r, 30));
+  }
+}
+/* ---------- live microphone (real-time, 48k->16k downsample + stream) ---------- */
+let micCtx = null, micSource = null, micProc = null, micStream = null, micBuf = [], micNative = 48000;
+const LIVE_FRAME = 4000;
+
+function toInt16Frames(floats) {
+  // RESAMPLE nativeRate -> 16000: weighted 2-tap low-pass over `ratio` samples, then decimate
+  const ratio = Math.round(micNative / 16000);
+  const out = [];
+  for (let i = 0; i + ratio <= floats.length; i += ratio) {
+    let acc = 0;
+    for (let k = 0; k < ratio; k++) acc += floats[i + k];
+    const f = (acc * 2) / (ratio + 1) - floats[i] / (ratio + 1); // gentle HF rolloff
+    out.push(Math.max(-1, Math.min(1, f)) * 32767);
+  }
+  return out;
+}
+
+async function startMic() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) { setStatus('No connection', '#ff4d6d'); return; }
+  try { micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } }); }
+  catch (e) { setStatus('Mic denied: ' + e.name, '#ff4d6d'); return; }
+  micCtx = new (window.AudioContext || window.webkitAudioContext)();
+  micNative = micCtx.sampleRate;
+  micSource = micCtx.createMediaStreamSource(micStream);
+  micProc = micCtx.createScriptProcessor(4096, 1, 1);
+  const mute = micCtx.createGain(); mute.gain.value = 0;
+  micSource.connect(micProc); micProc.connect(mute); mute.connect(micCtx.destination);
+  running = true; micBuf = [];
+  el('rec-btn').disabled = true; el('rec-btn').textContent = '◼ Stop mic';
+  el('run-btn').disabled = true; el('file').disabled = true;
+  setStatus('MIC LIVE — streaming', '#2bd97b');
+  ws.send(JSON.stringify({ type: 'session_init', session_id: 'mic-' + Date.now(), sample_rate: 16000 }));
+  micProc.onaudioprocess = (ev) => {
+    if (!running || !ws || ws.readyState !== WebSocket.OPEN) return;
+    const ch = ev.inputBuffer.getChannelData(0);
+    micBuf.push(...toInt16Frames(ch));
+    while (micBuf.length >= LIVE_FRAME) {
+      const frame = new Int16Array(micBuf.splice(0, LIVE_FRAME));
+      ws.send(frame.buffer);
+    }
+    if (micBuf.length > LIVE_FRAME * 4) micBuf.splice(0, micBuf.length - LIVE_FRAME * 4); // safety cap
+  };
+}
+
+function stopMic() {
+  running = false;
+  if (micProc) { micProc.disconnect(); micProc.onaudioprocess = null; }
+  if (micSource) micSource.disconnect();
+  if (micStream) micStream.getTracks().forEach(t => t.stop());
+  if (micCtx && micCtx.close) micCtx.close();
+  micCtx = micSource = micProc = micStream = null; micBuf = [];
+  el('rec-btn').disabled = false; el('rec-btn').textContent = '🎤 Record (demo)';
+  el('run-btn').disabled = !el('file').files.length; el('file').disabled = false;
+  setStatus('Stopped');
+}
+el('rec-btn').onclick = () => { if (!running) startMic(); else stopMic(); };
+el('run-btn').onclick = startAnalysis;
+el('stop-btn').onclick = () => { if (running && micCtx) { stopMic(); return; } running = false; el('run-btn').disabled = false; el('stop-btn').disabled = true; setStatus('Stopped'); };
+el('file').onchange = () => { el('run-btn').disabled = !el('file').files.length; };
+
+/* ---------- enroll voice from mic (~3s) then POST /enroll ---------- */
+let enrollStream = null, enrollCtx = null, enrollSrc = null, enrollProc = null, enrollRaw = [], enrollNative = 48000;
+
+async function enrollFromMic() {
+  try { enrollStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } }); }
+  catch (e) { setStatus('Mic denied: ' + e.name, '#ff4d6d'); return; }
+  enrollCtx = new (window.AudioContext || window.webkitAudioContext)();
+  enrollNative = enrollCtx.sampleRate;
+  enrollSrc = enrollCtx.createMediaStreamSource(enrollStream);
+  enrollProc = enrollCtx.createScriptProcessor(4096, 1, 1);
+  const mute = enrollCtx.createGain(); mute.gain.value = 0;
+  enrollSrc.connect(enrollProc); enrollProc.connect(mute); mute.connect(enrollCtx.destination);
+  enrollRaw = [];
+  const btn = el('enroll-btn');
+  btn.disabled = true; btn.textContent = '⏺ Speak for 3s…';
+  setStatus('Enrolling — speak clearly for ~3s', '#2bd97b');
+  const t0 = performance.now();
+  enrollProc.onaudioprocess = (ev) => {
+    if (performance.now() - t0 > 3400) { finishEnroll(); return; }
+    enrollRaw.push(...ev.inputBuffer.getChannelData(0));
+  };
+  setTimeout(() => { if (enrollRaw.length) finishEnroll(); }, 3600);
+}
+
+async function finishEnroll() {
+  if (enrollProc) { enrollProc.disconnect(); enrollProc.onaudioprocess = null; }
+  const src = enrollSrc, stream = enrollStream, ctx = enrollCtx;
+  enrollRaw = []; enrollSrc = null; enrollStream = null; enrollProc = null; enrollCtx = null;
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  if (src) src.disconnect();
+  if (ctx && ctx.close) ctx.close();
+  const btn = el('enroll-btn');
+  btn.textContent = '🗣 Enroll my voice'; btn.disabled = false;
+  if (!enrollRaw.length) { setStatus('No audio captured', '#ff4d6d'); return; }
+
+  // downsample native -> 16k ((2:1 blend over ratio samples) + clip to ~3s)
+  const ratio = Math.round(enrollNative / 16000);
+  const frames = [];
+  for (let i = 0; i + ratio <= enrollRaw.length; i += ratio) {
+    let acc = 0;
+    for (let k = 0; k < ratio; k++) acc += enrollRaw[i + k];
+    acc = (acc / ratio) * 2 - enrollRaw[i]; // slight emphasis on first tap = cheap low-pass blend
+    frames.push(Math.max(-1, Math.min(1, acc)));
+  }
+  const maxLen = 16000 * 3;
+  const use = frames.slice(0, maxLen);
+  const i16 = new Int16Array(use.length);
+  for (let i = 0; i < use.length; i++) i16[i] = Math.max(-1, Math.min(1, use[i])) * 32767;
+
+  const b64 = arrayBufferToBase64(i16.buffer);
+  setStatus('Uploading enrollment…', '#ffc94d');
+  try {
+    const r = await fetch(ENROLL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ speaker_id: 'demo', audio_b64: b64, sample_rate: 16000 })
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || r.status);
+    setStatus('Enrolled as "demo" ✓', '#2bd97b');
+    el('m-spr').textContent = 'demo (enrolled)';
+  } catch (e) { setStatus('Enroll failed: ' + e.message, '#ff4d6d'); }
+}
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer); let bin = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  return btoa(bin);
+}
+el('enroll-btn').onclick = enrollFromMic;
+connectLoop();
+</script>
+</body>
+</html>
