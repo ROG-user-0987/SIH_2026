@@ -63,7 +63,6 @@ class WebSocketHandler:
         sample_rate = SAMPLE_RATE
         audio_buffer = np.array([], dtype=np.float32)
         window_count = 0
-        vad = SileroVAD(use_torch=False) if not self.mock_mode else None
 
         try:
             raw_msg = await websocket.receive_text()
@@ -245,6 +244,7 @@ class WebSocketHandler:
         if orig_sr == target_sr:
             return audio
         try:
+            import torch
             import torchaudio
             waveform = torch.from_numpy(audio).unsqueeze(0)
             resampler = torchaudio.transforms.Resample(orig_freq=orig_sr, new_freq=target_sr)

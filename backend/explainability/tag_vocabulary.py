@@ -106,13 +106,16 @@ class TagVocabulary:
                 if trigger_source.startswith("_"):
                     if trigger_source == "_cross_detector" and trigger_fn(scores):
                         tags.append(tag_name)
+                        break
                     elif trigger_source == "_overall" and trigger_fn(fusion_result):
                         tags.append(tag_name)
+                        break
                     continue
                 if trigger_source in signal_map:
                     signal = signal_map[trigger_source]
                     if trigger_fn(signal["score"], signal):
                         tags.append(tag_name)
+                        break
 
         return tags
 

@@ -51,9 +51,7 @@ class ProsodyDetector:
 
         if self._loaded and self._model is not None:
             try:
-                import xgboost as xgb
-                dmatrix = xgb.DMatrix(features.reshape(1, -1))
-                prob = self._model.predict_proba(dmatrix)[0][1]
+                prob = self._model.predict_proba(features.reshape(1, -1))[0][1]
                 return {
                     "name": "prosody",
                     "category": "prosody",
